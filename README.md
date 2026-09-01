@@ -96,6 +96,18 @@ datos que no cumplen el esquema retornan `422`.
 
 ## Capturas de Swagger UI
 
-Abra `/docs` con el servidor en ejecucion y tome capturas de la lista de
-endpoints y de las respuestas probadas. Este repositorio no incluye actualmente
-archivos de imagen, por lo que no se agregan enlaces a capturas inexistentes.
+### Endpoints disponibles
+
+![Endpoints disponibles en Swagger UI](src/evidencia/endpoints.png)
+
+### Peticion GET de usuarios
+
+![Peticion GET de usuarios](src/evidencia/get.png)
+
+### Peticion POST para crear un usuario
+
+![Peticion POST para crear un usuario](src/evidencia/post.png)
+
+### Peticion GET de usuario por ID
+
+![Peticion GET de usuario por ID](src/evidencia/get_userId.png)
