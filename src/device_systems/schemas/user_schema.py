@@ -12,3 +12,10 @@ class UserCreate(BaseModel):
 
 class UserResponse(UserCreate):
     id: int
+
+
+class UserUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=3)
+    email: EmailStr | None = None
+    role: Literal["admin", "support", "user"] | None = None
+    is_active: bool | None = None
