@@ -168,6 +168,12 @@ a la base de datos.
    `http://127.0.0.1:8000` y replique las peticiones anteriores.
 6. Compruebe las cabeceras `X-App-Name` y `X-API-Version`.
 
+## Estructura del proyecto
+![Estructura del proyecto](src/evidencia/estructura_proyecto.png)
+
+## Base de datos
+[!Base de datos](src/evidencia/bd.png)
+
 ## Capturas de Swagger UI
 
 ### Endpoints disponibles
