@@ -172,7 +172,7 @@ a la base de datos.
 ![Estructura del proyecto](src/evidencia/estructura_proyecto.png)
 
 ## Base de datos
-[!Base de datos](src/evidencia/bd.png)
+![Base de datos](src/evidencia/bd.png)
 
 ## Capturas de Swagger UI
 
