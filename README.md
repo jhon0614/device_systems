@@ -1,10 +1,9 @@
 # device_systems
 
-API REST construida con FastAPI y Pydantic para administrar usuarios mediante
-un CRUD completo. Permite crear, consultar, filtrar, actualizar y eliminar
-usuarios, con validaciones, manejo de errores y Dependency Injection.
+API REST construida con FastAPI, SQLAlchemy y Pydantic para administrar usuarios
+mediante un CRUD completo. Los datos se guardan en una base de datos SQLite.
 
-> Los usuarios se almacenan en memoria y se eliminan cuando se reinicia el servidor.
+> La base de datos se crea automaticamente como `device_systems.db` al iniciar la API.
 
 ## Instalacion
 
@@ -28,6 +27,8 @@ La API queda disponible en `http://127.0.0.1:8000` y Swagger UI en
 
 - Python 3.11
 - FastAPI
+- SQLAlchemy
+- SQLite
 - Pydantic 2
 - Uvicorn
 
@@ -39,6 +40,7 @@ La API queda disponible en `http://127.0.0.1:8000` y Swagger UI en
 | GET | `/users/{user_id}` | Consulta un usuario por ID |
 | GET | `/users?role=admin` | Filtra usuarios por rol |
 | GET | `/users?is_active=true` | Filtra usuarios por estado |
+| GET | `/users?order_by=created_at` | Ordena por fecha de creacion |
 | POST | `/users` | Registra un usuario |
 | PUT | `/users/{user_id}` | Reemplaza todos los datos de un usuario |
 | PATCH | `/users/{user_id}` | Modifica algunos datos de un usuario |
@@ -60,7 +62,8 @@ Content-Type: application/json
   "name": "Ana Torres",
   "email": "ana@example.com",
   "role": "admin",
-  "is_active": true
+  "is_active": true,
+  "created_at": "2026-09-14T10:00:00"
 }
 ```
 
@@ -138,17 +141,22 @@ DELETE /users/1 HTTP/1.1
 | 404 | Usuario no encontrado |
 | 422 | Datos enviados no validos |
 
-## Dependency Injection y manejo de errores
+## Persistencia, Dependency Injection y manejo de errores
 
-La funcion `get_user_or_404` busca el usuario solicitado. Las rutas GET por ID,
-PUT, PATCH y DELETE la reutilizan mediante `Depends()`. Si el usuario no existe,
-la dependencia genera una excepcion HTTP con codigo 404.
+El modelo SQLAlchemy `User` representa la tabla `users`. El servicio realiza las
+consultas y operaciones CRUD usando la sesion de SQLAlchemy.
 
-La dependencia `get_email_validator` reutiliza una sola funcion para comprobar
-que el correo no pertenezca a otro usuario antes de ejecutar POST, PUT y PATCH.
+La dependencia `get_db` abre una sesion para cada peticion mediante `Depends()`
+y garantiza que se cierre al finalizar la operacion.
 
-Los correos duplicados y las actualizaciones vacias se controlan con
-`HTTPException`. Pydantic valida automaticamente el nombre, correo, rol y estado.
+La dependencia `get_user_or_404` busca el usuario solicitado para GET, PUT,
+PATCH y DELETE. La dependencia `get_email_validator` reutiliza la validacion de
+correo duplicado en POST, PUT y PATCH. FastAPI comparte la misma sesion dentro
+de cada peticion.
+
+Los usuarios inexistentes, correos duplicados y PATCH vacios se controlan con
+`HTTPException`. Pydantic valida el nombre, correo, rol y estado antes de acceder
+a la base de datos.
 
 ## Pruebas manuales
 

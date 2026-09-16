@@ -1,25 +1,29 @@
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy.orm import Session
 
+from device_systems.dependencies.database_dependency import get_db
 from device_systems.dependencies.user_dependencies import (
     get_email_validator,
     get_user_or_404,
 )
-from device_systems.schemas.user_schema import UserCreate, UserResponse, UserUpdate
-from device_systems.services.user_service import (
-    create_user,
-    delete_user,
-    get_all_users,
-    update_user,
+from device_systems.models.user_model import User
+from device_systems.schemas.user_schema import (
+    UserCreate,
+    UserPatch,
+    UserResponse,
+    UserUpdate,
 )
+from device_systems.services import user_service
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
 
 def add_headers(response: Response):
+    # Agregar las cabeceras comunes del recurso users.
     response.headers["X-App-Name"] = "device_systems"
-    response.headers["X-API-Version"] = "2.0"
+    response.headers["X-API-Version"] = "3.0"
 
 
 @router.get(
@@ -27,23 +31,17 @@ def add_headers(response: Response):
     response_model=list[UserResponse],
     status_code=status.HTTP_200_OK,
     summary="Listar usuarios",
-    description="Retorna todos los usuarios y permite filtrar por rol o estado.",
-    response_description="Lista de usuarios",
+    description="Lista, filtra y ordena los usuarios guardados en la base de datos.",
 )
-async def list_users(
+def list_users(
     response: Response,
-    role: Optional[Literal["admin", "support", "user"]] = None,
-    is_active: Optional[bool] = None,
+    role: Literal["admin", "support", "user"] | None = None,
+    is_active: bool | None = None,
+    order_by: Literal["name", "created_at"] = "name",
+    db: Session = Depends(get_db),
 ):
     add_headers(response)
-    users = get_all_users()
-
-    if role is not None:
-        users = [user for user in users if user["role"] == role]
-    if is_active is not None:
-        users = [user for user in users if user["is_active"] == is_active]
-
-    return users
+    return user_service.get_users(db, role, is_active, order_by)
 
 
 @router.get(
@@ -51,10 +49,12 @@ async def list_users(
     response_model=UserResponse,
     status_code=status.HTTP_200_OK,
     summary="Consultar usuario",
-    description="Busca un usuario por su ID.",
-    response_description="Usuario encontrado",
+    description="Busca un usuario por su ID en la base de datos.",
 )
-async def get_user(response: Response, user=Depends(get_user_or_404)):
+def get_user(
+    response: Response,
+    user: User = Depends(get_user_or_404),
+):
     add_headers(response)
     return user
 
@@ -64,17 +64,17 @@ async def get_user(response: Response, user=Depends(get_user_or_404)):
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Crear usuario",
-    description="Registra un usuario nuevo y evita correos duplicados.",
-    response_description="Usuario creado",
+    description="Guarda un usuario nuevo en la base de datos.",
 )
-async def post_user(
+def create_user(
     user_data: UserCreate,
     response: Response,
+    db: Session = Depends(get_db),
     validate_email=Depends(get_email_validator),
 ):
     add_headers(response)
     validate_email(str(user_data.email))
-    return create_user(user_data)
+    return user_service.create_user(db, user_data)
 
 
 @router.put(
@@ -83,17 +83,17 @@ async def post_user(
     status_code=status.HTTP_200_OK,
     summary="Actualizar usuario completo",
     description="Reemplaza todos los datos de un usuario existente.",
-    response_description="Usuario actualizado",
 )
-async def put_user(
-    user_data: UserCreate,
+def update_user(
+    user_data: UserUpdate,
     response: Response,
-    user=Depends(get_user_or_404),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_user_or_404),
     validate_email=Depends(get_email_validator),
 ):
     add_headers(response)
-    validate_email(str(user_data.email), user["id"])
-    return update_user(user, user_data.model_dump())
+    validate_email(str(user_data.email), user.id)
+    return user_service.update_user(db, user, user_data)
 
 
 @router.patch(
@@ -102,15 +102,16 @@ async def put_user(
     status_code=status.HTTP_200_OK,
     summary="Actualizar usuario parcialmente",
     description="Modifica solamente los campos enviados por el cliente.",
-    response_description="Usuario actualizado",
 )
-async def patch_user(
-    user_data: UserUpdate,
+def patch_user(
+    user_data: UserPatch,
     response: Response,
-    user=Depends(get_user_or_404),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_user_or_404),
     validate_email=Depends(get_email_validator),
 ):
     add_headers(response)
+    # exclude_unset evita modificar campos que no llegaron en el JSON.
     fields_to_update = user_data.model_dump(exclude_unset=True)
 
     if not fields_to_update:
@@ -118,25 +119,29 @@ async def patch_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Debe enviar al menos un campo",
         )
+
     if any(value is None for value in fields_to_update.values()):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Los campos no pueden ser nulos",
         )
 
-    if user_data.email is not None:
-        validate_email(str(user_data.email), user["id"])
+    if "email" in fields_to_update:
+        validate_email(str(fields_to_update["email"]), user.id)
 
-    return update_user(user, fields_to_update)
+    return user_service.patch_user(db, user, fields_to_update)
 
 
 @router.delete(
     "/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Eliminar usuario",
-    description="Elimina un usuario existente.",
-    response_description="Usuario eliminado",
+    description="Elimina un usuario de la base de datos.",
 )
-async def remove_user(response: Response, user=Depends(get_user_or_404)):
+def delete_user(
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_user_or_404),
+):
     add_headers(response)
-    delete_user(user)
+    user_service.delete_user(db, user)
