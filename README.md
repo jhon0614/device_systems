@@ -251,10 +251,27 @@ a la base de datos.
 
 ## Reflexion
 
-Alembic permite evolucionar la base de datos de forma controlada y reproducible.
-Las relaciones garantizan que cada prestamo tenga un usuario y un dispositivo,
-mientras que los joins permiten consultar informacion completa sin duplicar los
-datos entre tablas.
+Las migraciones son importantes porque permiten registrar y aplicar los cambios
+de la estructura de la base de datos de forma ordenada. Con Alembic es posible
+saber que revision esta instalada, consultar el historial y actualizar o revertir
+la estructura sin tener que crear manualmente todas las tablas en cada entorno.
+
+Las relaciones entre modelos permiten representar correctamente las reglas del
+sistema. En `device_systems`, cada prestamo debe pertenecer a un usuario y a un
+dispositivo existentes. Las claves foraneas protegen esta integridad, mientras
+que `relationship()` y `back_populates` facilitan el acceso a la informacion
+relacionada desde los modelos SQLAlchemy.
+
+Las consultas avanzadas permiten aprovechar esas relaciones para obtener datos
+utiles sin duplicarlos. Mediante `join()` se muestran juntos el prestamo, el
+usuario y el dispositivo. Los filtros con `where()`, `and_()`, `or_()` e
+`ilike()` permiten realizar busquedas flexibles por estado, correo, tipo de
+dispositivo, disponibilidad, marca, texto o fechas.
+
+Esta actividad permitio comprender que una API relacional necesita algo mas que
+varias tablas: requiere migraciones reproducibles, relaciones bien definidas,
+reglas de integridad y consultas capaces de combinar la informacion de forma
+clara y eficiente.
 
 ## Estructura del proyecto
 ![Estructura del proyecto](src/evidencia/estructura_proyecto.png)
