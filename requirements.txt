@@ -1,3 +1,4 @@
+alembic==1.20.0
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.14.2
@@ -10,6 +11,8 @@ greenlet==3.5.6
 h11==0.16.0
 httptools==0.8.0
 idna==3.19
+mako==1.4.1
+markupsafe==3.0.3
 pydantic==2.13.5
 pydantic-core==2.46.5
 python-dotenv==1.2.3

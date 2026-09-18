@@ -144,4 +144,9 @@ def delete_user(
     user: User = Depends(get_user_or_404),
 ):
     add_headers(response)
+    if user.loans:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No se puede eliminar un usuario con prestamos registrados",
+        )
     user_service.delete_user(db, user)
