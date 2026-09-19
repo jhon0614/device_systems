@@ -2,6 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from device_systems.dependencies.database_dependency import get_db
+from device_systems.dependencies.auth_dependency import (
+    require_admin,
+    require_admin_or_support,
+)
 from device_systems.dependencies.device_dependencies import get_device_or_404
 from device_systems.models.device_model import Device
 from device_systems.schemas.device_schema import (
@@ -60,7 +64,11 @@ def get_device(device: Device = Depends(get_device_or_404)):
     description="Registra un dispositivo con numero de serie unico.",
     response_description="Dispositivo creado",
 )
-def create_device(device_data: DeviceCreate, db: Session = Depends(get_db)):
+def create_device(
+    device_data: DeviceCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin_or_support),
+):
     validate_serial(db, device_data.serial_number)
     return device_service.create_device(db, device_data)
 
@@ -76,6 +84,7 @@ def update_device(
     device_data: DeviceUpdate,
     db: Session = Depends(get_db),
     device: Device = Depends(get_device_or_404),
+    current_user=Depends(require_admin_or_support),
 ):
     validate_serial(db, device_data.serial_number, device.id)
     return device_service.update_device(db, device, device_data)
@@ -124,6 +133,7 @@ def delete_device(
     response: Response,
     db: Session = Depends(get_db),
     device: Device = Depends(get_device_or_404),
+    current_user=Depends(require_admin),
 ):
     if device.loans:
         raise HTTPException(

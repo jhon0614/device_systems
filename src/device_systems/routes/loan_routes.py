@@ -1,15 +1,20 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from device_systems.dependencies.database_dependency import get_db
+from device_systems.dependencies.auth_dependency import (
+    get_current_active_user,
+    require_admin_or_support,
+)
 from device_systems.dependencies.device_dependencies import get_device_or_404
 from device_systems.dependencies.loan_dependencies import get_loan_or_404
 from device_systems.dependencies.user_dependencies import get_user_or_404
 from device_systems.models.device_model import Device
 from device_systems.models.loan_model import Loan
 from device_systems.models.user_model import User
+from device_systems.middlewares.request_middleware import limiter
 from device_systems.schemas.loan_schema import (
     LoanCreate,
     LoanDetailResponse,
@@ -61,7 +66,10 @@ def list_loans(
     description="Muestra cada prestamo con su usuario y dispositivo relacionados.",
     response_description="Detalles de prestamos",
 )
-def get_loan_details(db: Session = Depends(get_db)):
+def get_loan_details(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_or_support),
+):
     return loan_service.get_loans(db)
 
 
@@ -84,7 +92,13 @@ def get_loan(loan: Loan = Depends(get_loan_or_404)):
     description="Asocia un dispositivo disponible con un usuario existente.",
     response_description="Prestamo creado",
 )
-def create_loan(loan_data: LoanCreate, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def create_loan(
+    request: Request,
+    loan_data: LoanCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     user = user_service.get_user_by_id(db, loan_data.user_id)
     if user is None:
         raise HTTPException(
@@ -117,6 +131,7 @@ def create_loan(loan_data: LoanCreate, db: Session = Depends(get_db)):
 def return_loan(
     db: Session = Depends(get_db),
     loan: Loan = Depends(get_loan_or_404),
+    current_user: User = Depends(require_admin_or_support),
 ):
     if loan.status == "returned":
         raise HTTPException(

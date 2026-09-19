@@ -1,9 +1,11 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from device_systems.dependencies.database_dependency import get_db
+from device_systems.dependencies.auth_dependency import get_current_active_user
+from device_systems.middlewares.request_middleware import limiter
 from device_systems.dependencies.user_dependencies import (
     get_email_validator,
     get_user_or_404,
@@ -33,12 +35,15 @@ def add_headers(response: Response):
     summary="Listar usuarios",
     description="Lista, filtra y ordena los usuarios guardados en la base de datos.",
 )
+@limiter.limit("30/minute")
 def list_users(
+    request: Request,
     response: Response,
     role: Literal["admin", "support", "user"] | None = None,
     is_active: bool | None = None,
     order_by: Literal["name", "created_at"] = "name",
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     add_headers(response)
     return user_service.get_users(db, role, is_active, order_by)
@@ -54,6 +59,7 @@ def list_users(
 def get_user(
     response: Response,
     user: User = Depends(get_user_or_404),
+    current_user: User = Depends(get_current_active_user),
 ):
     add_headers(response)
     return user

@@ -1,8 +1,8 @@
 # device_systems
 
-API REST construida con FastAPI, SQLAlchemy, Alembic y Pydantic para administrar
-usuarios, dispositivos y prestamos. Los cambios de la base SQLite se controlan
-mediante migraciones.
+API REST segura construida con FastAPI, SQLAlchemy, Alembic y Pydantic para
+administrar usuarios, dispositivos y prestamos. Incluye autenticacion OAuth2
+con JWT, autorizacion por roles, CORS, middleware de trazabilidad y rate limiting.
 
 > La estructura de la base de datos se crea con `alembic upgrade head`.
 
@@ -13,6 +13,9 @@ Requiere Python 3.11 o superior y [uv](https://docs.astral.sh/uv/).
 ```powershell
 uv sync
 ```
+
+Copie las variables de `.env.example` en `.env` y cambie `SECRET_KEY` antes de
+usar la aplicacion fuera del entorno local.
 
 ## Ejecucion
 
@@ -39,13 +42,19 @@ La API queda disponible en `http://127.0.0.1:8000` y Swagger UI en
 - SQLite
 - Pydantic 2
 - Uvicorn
+- Passlib y bcrypt
+- Python-JOSE
+- SlowAPI
 
 ## Endpoints
 
 | Metodo | Endpoint | Descripcion |
 |---|---|---|
-| GET | `/users` | Lista todos los usuarios |
-| GET | `/users/{user_id}` | Consulta un usuario por ID |
+| POST | `/auth/register` | Registra un usuario con contraseña segura |
+| POST | `/auth/login` | Autentica y genera un token JWT |
+| GET | `/auth/me` | Consulta el usuario autenticado |
+| GET | `/users` | Lista usuarios; requiere autenticacion |
+| GET | `/users/{user_id}` | Consulta un usuario; requiere autenticacion |
 | GET | `/users?role=admin` | Filtra usuarios por rol |
 | GET | `/users?is_active=true` | Filtra usuarios por estado |
 | GET | `/users?order_by=created_at` | Ordena por fecha de creacion |
@@ -55,15 +64,15 @@ La API queda disponible en `http://127.0.0.1:8000` y Swagger UI en
 | DELETE | `/users/{user_id}` | Elimina un usuario |
 | GET | `/devices` | Lista y filtra dispositivos |
 | GET | `/devices/{device_id}` | Consulta un dispositivo |
-| POST | `/devices` | Registra un dispositivo |
-| PUT | `/devices/{device_id}` | Actualiza completamente un dispositivo |
+| POST | `/devices` | Registra un dispositivo; admin o support |
+| PUT | `/devices/{device_id}` | Actualiza un dispositivo; admin o support |
 | PATCH | `/devices/{device_id}` | Actualiza parcialmente un dispositivo |
-| DELETE | `/devices/{device_id}` | Elimina un dispositivo sin prestamos |
+| DELETE | `/devices/{device_id}` | Elimina un dispositivo; solo admin |
 | GET | `/loans` | Lista prestamos con joins y filtros |
-| GET | `/loans/details` | Muestra informacion relacionada |
+| GET | `/loans/details` | Muestra informacion; admin o support |
 | GET | `/loans/{loan_id}` | Consulta un prestamo |
-| POST | `/loans` | Registra un prestamo |
-| PATCH | `/loans/{loan_id}/return` | Devuelve un dispositivo |
+| POST | `/loans` | Registra un prestamo; requiere autenticacion |
+| PATCH | `/loans/{loan_id}/return` | Devuelve un dispositivo; admin o support |
 | GET | `/users/{user_id}/loans` | Prestamos de un usuario |
 | GET | `/devices/{device_id}/loans` | Historial de un dispositivo |
 
@@ -72,19 +81,49 @@ Los filtros `role` e `is_active` pueden combinarse. Los roles permitidos son
 
 ## Ejemplos de peticiones
 
-Crear un usuario:
+Registrar un usuario con contraseña segura:
 
 ```http
-POST /users HTTP/1.1
+POST /auth/register HTTP/1.1
 Host: 127.0.0.1:8000
 Content-Type: application/json
 
 {
   "name": "Ana Torres",
   "email": "ana@example.com",
+  "password": "Clave123",
   "role": "admin",
   "is_active": true
 }
+```
+
+La contraseña se transforma en un hash bcrypt antes de guardarse y nunca forma
+parte del modelo de respuesta.
+
+El inicio de sesion usa datos de formulario OAuth2. El campo `username` recibe
+el correo del usuario:
+
+```http
+POST /auth/login HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+username=ana@example.com&password=Clave123
+```
+
+Respuesta esperada:
+
+```json
+{
+  "access_token": "token_generado",
+  "token_type": "bearer"
+}
+```
+
+Para consultar una ruta privada se envia el token:
+
+```http
+GET /auth/me HTTP/1.1
+Authorization: Bearer token_generado
 ```
 
 Respuesta esperada (`201 Created`):
@@ -192,12 +231,16 @@ GET /devices/1/loans
 | 404 | Usuario no encontrado |
 | 409 | Dispositivo no disponible o prestamo ya devuelto |
 | 422 | Datos enviados no validos |
+| 401 | Token ausente, invalido o credenciales incorrectas |
+| 403 | Usuario inactivo o rol sin permiso |
+| 429 | Limite de peticiones superado |
 
 ## Migraciones con Alembic
 
 Alembic usa `Base.metadata` y carga los modelos `User`, `Device` y `Loan` desde
 `alembic/env.py`. La migracion inicial crea las tres tablas, indices, claves
-foraneas y restricciones.
+foraneas y restricciones. La migracion `add authentication fields to users`
+agrega `hashed_password` como campo obligatorio sin borrar registros anteriores.
 
 ```powershell
 uv run alembic revision --autogenerate -m "descripcion del cambio"
@@ -238,16 +281,52 @@ Los usuarios inexistentes, correos duplicados y PATCH vacios se controlan con
 `HTTPException`. Pydantic valida el nombre, correo, rol y estado antes de acceder
 a la base de datos.
 
+## Seguridad, CORS y middleware
+
+`get_current_user` valida el token, `get_current_active_user` comprueba que la
+cuenta este activa y las dependencias de roles autorizan solamente a `admin` o
+`support` cuando corresponde. Una petición sin token valido retorna `401` y una
+petición de un rol no autorizado retorna `403`.
+
+CORS permite durante el desarrollo los origenes
+`http://localhost:5173` y `http://localhost:3000`, incluyendo credenciales. No
+se recomienda usar `*` como origen en produccion cuando existen credenciales,
+porque se debe controlar expresamente que aplicaciones pueden consumir la API y
+el navegador no admite la combinacion de origen comodin con credenciales.
+
+El middleware mide el tiempo de respuesta, registra metodo, ruta y codigo de
+estado, y agrega `X-App-Name`, `X-Process-Time` y `X-Request-ID`. Si el cliente
+envia `X-Request-ID`, se conserva; de lo contrario se genera uno nuevo.
+
+SlowAPI aplica estos limites por cliente:
+
+| Endpoint | Limite |
+|---|---|
+| `POST /auth/register` | 3 por minuto |
+| `POST /auth/login` | 5 por minuto |
+| `GET /users` | 30 por minuto |
+| `POST /loans` | 10 por minuto |
+
 ## Pruebas manuales
 
-1. Aplique las migraciones e inicie el servidor.
-2. Cree un usuario y un dispositivo desde Swagger UI.
-3. Cree un prestamo y confirme que el dispositivo no quede disponible.
-4. Pruebe los filtros y consultas con joins.
-5. Devuelva el dispositivo y confirme que vuelva a estar disponible.
-6. Verifique los errores 400, 404, 409 y 422.
-7. En Postman o Thunder Client, cree una coleccion con la URL base
-   `http://127.0.0.1:8000` y replique las peticiones anteriores.
+1. Registrar un usuario con una contraseña valida.
+2. Intentar el registro con una contraseña debil.
+3. Intentar el registro con un correo duplicado.
+4. Iniciar sesion con las credenciales correctas.
+5. Intentar iniciar sesion con una contraseña incorrecta.
+6. Consultar `/auth/me` con el token.
+7. Acceder a `/users` sin token.
+8. Acceder a una ruta protegida con un token invalido.
+9. Acceder a una operación administrativa con rol `user`.
+10. Crear un dispositivo con rol `admin` o `support`.
+11. Intentar eliminar un dispositivo con un rol no permitido.
+12. Verificar CORS desde uno de los origenes autorizados.
+13. Revisar las tres cabeceras generadas por el middleware.
+14. Repetir el login seis veces en un minuto para obtener `429`.
+15. Verificar el esquema OAuth2 y los modelos en Swagger UI.
+
+Estas pruebas pueden realizarse en Swagger UI, Postman o Thunder Client usando
+la URL base `http://127.0.0.1:8000`.
 
 ## Reflexion
 
@@ -272,6 +351,13 @@ Esta actividad permitio comprender que una API relacional necesita algo mas que
 varias tablas: requiere migraciones reproducibles, relaciones bien definidas,
 reglas de integridad y consultas capaces de combinar la informacion de forma
 clara y eficiente.
+
+La seguridad tambien debe construirse en varias capas. El hash protege las
+contraseñas almacenadas, JWT identifica al usuario en cada petición, las
+dependencias verifican permisos, CORS controla los clientes web autorizados, el
+middleware facilita la trazabilidad y el rate limiting reduce el abuso. Ninguna
+medida reemplaza a las demas; juntas permiten que la API sea mas confiable sin
+mezclar la seguridad con la logica principal de cada endpoint.
 
 ## Estructura del proyecto
 ![Estructura del proyecto](src/evidencia/estructura_proyecto.png)
@@ -393,3 +479,77 @@ La devolucion cambia el estado del prestamo a `returned`, asigna la fecha de
 devolucion y vuelve a marcar el dispositivo como disponible.
 
 ![Devolucion de dispositivo](src/evidencia/devolucion_dispositivo.png)
+
+## Evidencias de la actividad EV11
+
+### Estructura del proyecto
+
+La estructura incorpora `auth`, `dependencies`, `middlewares` y los schemas de
+autenticacion, manteniendo los modulos de usuarios, dispositivos y prestamos.
+
+![Estructura del proyecto para EV11](src/evidencia/estructura_proyecto.png)
+
+### Migracion de autenticacion
+
+La revision `6c7099719697_add_authentication_fields_to_users.py` agrega el
+campo obligatorio `hashed_password` sin eliminar los usuarios existentes. Se
+aplico con `uv run alembic upgrade head` y se verifico con `uv run alembic
+current` y `uv run alembic check`. Falta adjuntar la captura de esta migracion;
+la captura anterior de Alembic corresponde a EV10.
+
+### Registro de usuario
+
+`POST /auth/register` valida los datos y almacena un hash de la contraseña. El
+modelo de respuesta excluye `password` y `hashed_password`. Falta adjuntar la
+captura del registro de EV11; la imagen de creacion de usuario anterior
+corresponde a EV10.
+
+### Login y token generado
+
+`POST /auth/login` recibe el correo en el campo OAuth2 `username` y devuelve
+`access_token` con tipo `bearer`.
+
+![Login y token generado](src/evidencia/login_token.png)
+
+### Consulta del usuario autenticado
+
+`GET /auth/me` usa el token para devolver el perfil sin exponer el hash.
+
+![Consulta de auth me](src/evidencia/auth_me.png)
+
+### Acceso sin token
+
+Una peticion a `GET /users` sin autenticacion recibe `401 Unauthorized`.
+
+![Acceso sin token](src/evidencia/no_autenticado.png)
+
+### Acceso con rol no permitido
+
+Un usuario con rol distinto de `admin` recibe `403 Forbidden` al intentar
+eliminar un dispositivo.
+
+![Acceso con rol no permitido](src/evidencia/rol_no_permitido.png)
+
+### Swagger y OAuth2
+
+Swagger muestra `/auth` y los recursos existentes. Los candados identifican
+las rutas protegidas mediante el esquema OAuth2.
+
+![Swagger UI con rutas OAuth2](src/evidencia/endpoints.png)
+
+### Cabeceras del middleware
+
+La respuesta incluye `X-App-Name`, `X-Process-Time` y `X-Request-ID`.
+
+![Cabeceras generadas por el middleware](src/evidencia/middleware.png)
+
+### Limite de peticiones
+
+Al superar cinco intentos de `POST /auth/login` en un minuto, la API responde
+`429 Too Many Requests`.
+
+![Prueba de rate limiting](src/evidencia/rate_limiting.png)
+
+La configuracion de CORS y la reflexion sobre seguridad se explican en las
+secciones anteriores. Antes de publicar estas evidencias, se deben ocultar las
+contraseñas y los tokens visibles en las capturas.

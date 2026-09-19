@@ -2,11 +2,16 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from device_systems.models.user_model import User
+from device_systems.auth.security import get_password_hash
 
 
 def create_user(db: Session, user_data):
     # Convertir el schema Pydantic en un registro SQLAlchemy.
-    user = User(**user_data.model_dump())
+    user_fields = user_data.model_dump(exclude={"password"})
+    user = User(
+        **user_fields,
+        hashed_password=get_password_hash(user_data.password),
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
